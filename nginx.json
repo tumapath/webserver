@@ -1,0 +1,371 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+
+  "Description" : "Launches an nginx webserver for api",
+
+  "Parameters" : {
+    "InstanceType" : {
+      "Description" : "EC2 instance type",
+      "Type" : "String",
+      "Default" : "m3.medium",
+      "AllowedValues" : [
+        "t2.micro", "t2.small", "t2.medium",
+        "m3.medium", "m3.large", "m3.xlarge", "m3.2xlarge",
+        "c4.large", "c4.xlarge", "c4.2xlarge", "c4.4xlarge", "c4.8xlarge",
+        "c3.large", "c3.xlarge", "c3.2xlarge", "c3.4xlarge", "c3.8xlarge",
+        "r3.large", "r3.xlarge", "r3.2xlarge", "r3.4xlarge", "r3.8xlarge",
+        "i2.xlarge", "i2.2xlarge", "i2.4xlarge", "i2.8xlarge",
+        "hs1.8xlarge", "g2.2xlarge"
+      ],
+      "ConstraintDescription" : "must be a valid, HVM-compatible EC2 instance type."
+    },
+     "EnvParam": {
+      "Description": "Environment",
+      "Type": "String",
+      "AllowedValues": ["dev","qa","prod"],
+      "MinLength": "1"
+    },
+    "KeyName" : {
+      "Description" : "Existing EC2 KeyPair to be associated with all cluster instances for SSH access. For default AMIs, log in as the 'ec2-user' user.",
+      "Type" : "AWS::EC2::KeyPair::KeyName"
+    },
+    "Subnets" : {
+      "Description" : "List of VPC subnet IDs for the cluster. Note: must match up with the passed AvailabilityZones.",
+      "Type" : "List<AWS::EC2::Subnet::Id>"
+    },
+    "ELBSubnet" : {
+      "Description" : "List of VPC subnet IDs for the ELB. Note: must match up with the passed AvailabilityZones.",
+      "Type" : "List<AWS::EC2::Subnet::Id>"
+    },
+    "VpcId" : {
+      "Description" : "VPC associated with the provided subnets",
+      "Type" : "AWS::EC2::VPC::Id"
+    },
+    "AdminSecurityGroup" : {
+      "Description" : "Existing security group that should be granted administrative access",
+      "Type" : "AWS::EC2::SecurityGroup::Id"
+    },
+    "AvailabilityZones": {
+      "Description" : "(Optional) If passed, only launch nodes in these AZs (e.g., 'us-east-1a,us-east-1b'). Note: these must match up with the passed Subnets.",
+      "Type" : "CommaDelimitedList",
+      "Default" : "us-east-1d"
+    },
+    "Region" : {
+      "Description" : "(Optional) Used for code deploy agent. Default value is used unless if specified",
+      "Type" : "String",
+      "Default" : "us-east-1"
+    },
+    "DockerImage" : {
+      "Description" : "Path of the Docker image (format: '[<registry>[:<port>]/]<repository>:<version>')",
+      "Type" : "String",
+      "Default" : "appiriodevops/nginx"
+    },
+    "EnvParam": {
+      "Description": "Environment",
+      "Type": "String",
+      "AllowedValues": ["dev","qa","prod"],
+      "MinLength": "1"
+    },
+    "OpsworksStackId": {
+       "Description" : "Opsworks stack id for installing system tools",
+       "Type" : "String"
+    }
+  },
+
+  "Mappings" : {
+    "RegionMap" : {
+      "us-east-1" : {
+        "AMI" : "ami-163a247e"
+      },
+      "us-west-1": { 
+        "AMI" : "ami-110d7471" 
+      }
+    }
+  },
+
+  "Conditions" : {
+    "UseAllAvailabilityZones" : {"Fn::Equals" : [{ "Fn::Join" : ["", {"Ref" : "AvailabilityZones"} ]}, ""]}
+  },
+
+  "Resources" : {
+    "IAMUser" : {
+      "Type" : "AWS::IAM::User",
+      "Properties" : {
+        "Policies" : [{
+          "PolicyName" : "WebserverAccess",
+          "PolicyDocument" : {
+            "Statement": [{
+              "Effect"   : "Allow",
+              "Action"   : "ec2:Describe*",
+              "Resource" : "*"
+            }]
+          }
+        },
+        {
+          "PolicyName" : "IAMAccess",
+          "PolicyDocument" : {
+            "Statement" : [{
+              "Effect"    : "Allow",
+              "NotAction" : "iam:*",
+              "Resource"  : "*"
+            }]
+          }
+        }]
+      }
+    },
+
+    "HostKeys" : {
+      "Type" : "AWS::IAM::AccessKey",
+      "Properties" : {
+        "UserName" : {"Ref": "IAMUser"}
+      }
+    },
+     "EC2Role": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "ec2.amazonaws.com", "codedeploy.amazonaws.com", "codepipeline.amazonaws.com"
+                ]
+              },
+              "Action": [
+                "sts:AssumeRole"
+              ]
+            }
+          ]
+        },
+        "Path": "/",
+        "Policies": [
+          {
+            "PolicyName": "nginx",
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:Describe*"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:Get*"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "codedeploy:*"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "codepipeline:*"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "opsworks:*"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "autoscaling:*"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "iam:*"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "EC2InstanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Path": "/",
+        "Roles": [
+          {
+            "Ref": "EC2Role"
+          }
+        ]
+      }
+    },
+
+    "ServerGroup" : {
+      "Type" : "AWS::AutoScaling::AutoScalingGroup",
+      "Properties" : {
+        "AvailabilityZones" : {
+          "Fn::If" : [
+            "UseAllAvailabilityZones",
+            { "Fn::GetAZs": "AWS::Region" },
+            { "Ref" : "AvailabilityZones" }
+          ]
+        },
+        "LaunchConfigurationName" : { "Ref" : "LaunchConfig" },
+        "MinSize" : "1",
+        "MaxSize" : "1",
+        "DesiredCapacity" : "1",
+        "LoadBalancerNames" : [ { "Ref" : "ElasticLoadBalancer" } ],
+        "VPCZoneIdentifier" : { "Ref" : "Subnets" },
+        "Tags" : [
+          {
+            "PropagateAtLaunch" : "true",
+            "Key" : "Name",
+            "Value" : "nginx-api"
+          }
+        ]
+      }
+    },
+
+    "ElasticLoadBalancer" : {
+      "Type" : "AWS::ElasticLoadBalancing::LoadBalancer",
+      "Properties" : {
+        "Scheme" : "internet-facing",
+        "SecurityGroups" : [ { "Ref" : "ELBSecurityGroup"}],
+        "Subnets" : { "Ref" : "ELBSubnet" },
+        "Listeners" : [ {
+          "LoadBalancerPort" : "80",
+          "InstancePort" : "8000",
+          "Protocol" : "HTTP"
+        }],
+        "HealthCheck" : {
+          "Target" : "TCP:8000",
+          "HealthyThreshold" : "3",
+          "UnhealthyThreshold" : "5",
+          "Interval" : "30",
+          "Timeout" : "5"
+        }
+      }
+    },
+
+    "ELBSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties" : {
+              "VpcId" : { "Ref" : "VpcId" },
+              "GroupDescription" : "allow connections from specified CIDR ranges",
+               "SecurityGroupIngress" : [
+                   {
+                       "IpProtocol" : "tcp",
+                       "FromPort" : "80",
+                       "ToPort" : "80",
+                       "CidrIp" : "0.0.0.0/0"
+                   },
+                   {
+                       "IpProtocol" : "tcp",
+                       "FromPort" : "443",
+                       "ToPort" : "443",
+                       "CidrIp" : "0.0.0.0/0"
+                   }
+               ]
+            }
+    },
+
+    "LaunchConfig" : {
+      "Type" : "AWS::AutoScaling::LaunchConfiguration",
+      "Properties" : {
+        "KeyName" : { "Ref" : "KeyName" },
+        "ImageId" : { "Fn::FindInMap" : [ "RegionMap", { "Ref" : "AWS::Region" }, "AMI"] },
+        "SecurityGroups" : [ { "Ref" : "ServerSecurityGroup" }, { "Ref": "AdminSecurityGroup" } ],
+        "IamInstanceProfile": { "Ref": "EC2InstanceProfile" },
+        "AssociatePublicIpAddress": "false",
+        "InstanceType" : { "Ref" : "InstanceType" },
+        "UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [
+          "#!/bin/bash -ex\n",
+          "yum update -y aws-cfn-bootstrap\n",
+          "yum install -y aws-cli\n",
+          "echo `whoami`\n",
+          "echo 'Defaults:root !requiretty' >> /etc/sudoers.d/cloud-init\n",
+          "su - root -c 'aws opsworks register --infrastructure-class ec2 --region us-east-1 --stack-id ", { "Ref" : "OpsworksStackId" }," --local' || error_exit 'Failed to register with opsworks'\n",
+          "# Helper function\n",
+          "function error_exit\n",
+          "{\n",
+          "  cfn-signal -e 1 -r \"$1\" '", { "Ref" : "WaitHandle" }, "'\n",
+          "  exit 1\n",
+          "}\n",
+          "echo export environment=", { "Ref" : "EnvParam"}," >> ~/.bash_profile\n",
+          "source ~/.bash_profile\n",
+          "# Install the AWS CodeDeploy Agent.\n",
+          "cd /home/ec2-user/\n",
+          "mkdir -p ~/.aws\n",
+          "aws s3 cp 's3://aws-codedeploy-",{ "Ref" : "Region" },"/latest/codedeploy-agent.noarch.rpm' . || error_exit 'Failed to download AWS CodeDeploy Agent.'\n",
+          "yum -y install codedeploy-agent.noarch.rpm || error_exit 'Failed to install AWS CodeDeploy Agent.' \n",
+          "aws s3 cp 's3://selva-",{ "Ref" : "EnvParam" },"/config' ~/.aws/config|| error_exit 'Failed to download docker credentials.'\n",
+          "# Set up and start the nginx service\n",
+          "mkdir -p /mnt/logs\n",
+          "mkdir -p /mnt/nginx/docker\n",
+          "mkdir -p /var/log/setup\n",
+          "sleep 120", "\n",
+          "docker pull ", { "Ref": "DockerImage" }, "\n",
+          "docker run ",
+          "   -d ",
+          "   -p 8000:8000",
+          "   --name nginx",
+          "   ", { "Ref": "DockerImage" }, "\n",
+          "aws codepipeline start-pipeline-execution --name nginx-api\n",
+
+          "# All is well so signal success\n",
+          "cfn-signal -e 0 -r \"Stack setup complete\" '", { "Ref" : "WaitHandle" }, "'\n",
+
+          "#EOF"
+        ]]}}
+      }
+    },
+    "ServerSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties" : {
+              "VpcId" : { "Ref" : "VpcId" },
+              "GroupDescription" : "allow connections from specified CIDR ranges",
+               "SecurityGroupIngress" : [
+                   {
+                       "IpProtocol" : "tcp",
+                       "FromPort" : "80",
+                       "ToPort" : "80",
+                       "CidrIp" : "0.0.0.0/0"
+                   },
+                   {
+                       "IpProtocol" : "tcp",
+                       "FromPort" : "22",
+                       "ToPort" : "22",
+                       "SourceSecurityGroupId" : { "Ref": "AdminSecurityGroup" }
+                   },
+                   {
+                       "IpProtocol" : "tcp",
+                       "FromPort" : "443",
+                       "ToPort" : "443",
+                       "CidrIp" : "0.0.0.0/0"
+                   },
+                   {
+                       "IpProtocol" : "tcp",
+                       "FromPort" : "8000",
+                       "ToPort" : "8000",
+                       "CidrIp" : "0.0.0.0/0"
+                   }
+               ]
+            }
+    },
+
+    "WaitHandle" : {
+      "Type" : "AWS::CloudFormation::WaitConditionHandle"
+    }
+  }
+}
