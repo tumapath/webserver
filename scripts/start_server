@@ -1,0 +1,17 @@
+#!/bin/bash
+cd /mnt/nginx
+chmod +x run
+chmod +x build
+id=`docker ps -q`
+if [[ $id ]]; then
+	echo "Stopping nginx server" >> /var/log/setup/setup.log
+	docker stop $id
+	echo "Removing nginx container" >> /var/log/setup/setup.log
+	docker rm -v $(docker ps -a -q -f status=exited)
+fi
+echo "Starting new docker conatiner for nginx with new files" >> /var/log/setup/setup.log
+cd /mnt/nginx/docker
+docker build --no-cache -t nginx-api:latest .
+echo "Built docker image" >> /var/log/setup/setup.log
+source ~/.bash_profile 
+docker run -d -e "ENV=${environment}" -v /mnt/nginx:/data/nginx -v /mnt/logs:/var/log/nginx/logs -p 8000:8000 nginx-api:latest

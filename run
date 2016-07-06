@@ -1,0 +1,15 @@
+mkdir -p /data/nginx/dist/sites-enabled
+mkdir -p /data/nginx/dist/includes
+
+cp /data/nginx/src/sites-enabled/*conf /data/nginx/dist/sites-enabled/
+cp /data/nginx/src/includes/*conf /data/nginx/dist/includes/
+cp /data/nginx/src/*conf /data/nginx/dist/
+
+ln -s /data/nginx/dist/nginx.conf /etc/nginx/nginx.conf
+ln -s /data/nginx/dist/limits.conf /etc/nginx/limits.conf
+ln -s /data/nginx/dist/sites-enabled /etc/nginx/sites-enabled
+ln -s /data/nginx/dist/includes /etc/nginx/includes
+
+chown -Rf nginx:nginx /data/nginx/dist
+
+nginx -t && nginx && tail -f /dev/null
